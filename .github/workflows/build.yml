@@ -1,34 +1,30 @@
 name: Sync, Build and Release
 
 on:
+  workflow_dispatch:  # Allow manual run
   schedule:
-    - cron: '0 0 * * *'  # Run every day at midnight UTC
-  workflow_dispatch:     # Allow manual triggering
+    - cron: '0 0 * * *'  # Run daily at midnight UTC
   push:
     branches:
-      - main              # Also run on manual pushes to main
+      - main  # Run if you push manually to main
 
 jobs:
-  sync-build-release:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout your fork
+    - name: Checkout
       uses: actions/checkout@v4
       with:
-        persist-credentials: false  # We need to set credentials manually to push
+        fetch-depth: 0  # Important for git operations
 
-    - name: Set up Git
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
+    - name: Add upstream remote
+      run: git remote add upstream https://github.com/anestisb/android-simg2img.git
 
-    - name: Add upstream and fetch
+    - name: Fetch and merge upstream
       run: |
-        git remote add upstream https://github.com/anestisb/android-simg2img.git
         git fetch upstream
-        git merge upstream/master --allow-unrelated-histories --no-edit || true
-        git push origin main || true
+        git merge upstream/master --allow-unrelated-histories -m "Sync with upstream"
 
     - name: Install dependencies
       run: sudo apt-get update && sudo apt-get install -y libz-dev
@@ -36,16 +32,28 @@ jobs:
     - name: Build project
       run: make
 
-    - name: Create tar.gz archive
+    - name: Make files executable
       run: |
-        tar czvf simg_tools.tar.gz append2simg img2simg simg2img simg2simg
+        chmod +x append2simg img2simg simg2img simg2simg
 
-    - name: Create GitHub Release
+    - name: Create archive
+      run: tar czvf simg_tools.tar.gz append2simg img2simg simg2img simg2simg
+
+    - name: Get date
+      id: date
+      run: echo "date=$(date +'%Y%m%d')" >> "$GITHUB_OUTPUT"
+
+    - name: Create tag
+      run: |
+        git config user.name "github-actions"
+        git config user.email "github-actions@github.com"
+        git tag upstream-${{ steps.date.outputs.date }}
+        git push origin upstream-${{ steps.date.outputs.date }}
+
+    - name: Upload to GitHub Releases
       uses: softprops/action-gh-release@v2
       with:
         files: simg_tools.tar.gz
-        tag_name: nightly-${{ github.run_number }}
-        name: Nightly Build ${{ github.run_number }}
-        body: "Automatic nightly build syncing with upstream."
+        tag_name: upstream-${{ steps.date.outputs.date }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
